@@ -1,0 +1,163 @@
+
+##Types of storms and other severe weather events with highest impact on public health and economy. US, 1950-2011
+
+Analysis conducted by TheCmos
+
+###SYNOPSIS
+
+This analysis is aimed at answering two questions: what are the types of storms and other severe weather events with highest impact on public health in the US and what are the events with highest impact on US economy, based on 1950-2011 U.S. National Oceanic and Atmospheric Administration's (NOAA) data. 
+The data is processed using R software and intends to follow the commonly accepted criteria for reproducible research. The plotting system ggplot2 has been used to create the figures.
+Tornadoes and floods, respectively, are the answers to the above questions.
+No operational recommendations are provided, but the results presented could help the subject matter experts determine the allocation of resources and the adoption of measures to mitigate the effects of severe weather events.
+
+
+###DATA PROCESSING
+
+The steps followed to process the data and reach the results are presented below.
+
+Load libraries
+```{r libraries}
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(stringr)
+library(markdown)
+library(knitr)
+library(ggpubr)
+```
+
+Download the file from NOAA's website
+```{r download}
+fileurl<-"https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(fileurl, destfile = "stormdata.csv.bz2")
+```
+
+Import the dataset into an R object
+```{r import}
+storm<-read.csv("stormdata.csv.bz2", header = TRUE)
+```
+
+In general it is a good idea as a preliminary step to convert all date variables to date format
+```{r convert to date}
+storm<-transform(storm,BGN_DATE=as.Date(BGN_DATE,"%m/%d/%Y"), END_DATE=as.Date(END_DATE,"%m/%d/%Y"))
+```
+
+####First objective: determine the types of storms and weather events that have highest impact on public health 
+
+It is reasonable to consider the number of fatalities as the main indicator of impact on public health. Therefore, the severity of the events will be determined based on this criterion. The number of injuries, although obviously a very important indicator, will be a secondary indicator, used to validate the conclusions reached using the first indicator, and to complement the understanding of the severity of the events.
+
+The next step is to calculate the sum of all fatalities by type of event across the entire period under study.
+
+```{r sum 1}
+stormhealth<-summarize(group_by(storm,EVTYPE),sfat=sum(FATALITIES,na.rm=T),sinj=sum(INJURIES,na.rm=T))
+```
+The following data transformations are used to sort the types of events based on the number of fatalities, presenting the top 20 types of events individually, and grouping all other types of events that cause fewer fatalities under the general category "Other", which will simplify the presentation of the results.
+```{r arrange and bind 1}
+stormhealth<-arrange(stormhealth,sfat,sinj)
+
+heatoptypes<-stormhealth[(nrow(stormhealth)-19):nrow(stormhealth),]
+heabottypes<-stormhealth[1:(nrow(stormhealth)-20),]
+
+totbot<-summarize(heabottypes,sfat=sum(sfat),sinj=sum(sinj))
+totbot<-mutate(totbot,EVTYPE="OTHER")
+totbot<-select(totbot,EVTYPE,sfat,sinj)
+heatypes<-rbind(totbot ,heatoptypes)
+```
+
+####Second objective: determine the types of weather events with highest economic impact. 
+The NOAA data available show two different measures, the impact on property and the impact on crops. It seems reasonable in this case to add both types of economic losses in order to determine the event with highest impact.
+
+As explained in NOAA's documentation, the table reports the economic losses in a variable that contains a number with three significant digits, and the units  in which that number is expressed (K usd, M usd, B usd) are stored in another variable. This applies both to property and crops losses. Therefore the first step in the analysis is to standardize the economic losses as a number expressed in US Dollars.
+The following lines of code convert the units variables to text format, then multiplies the three digit number by the corresponding factor (10^3, 10^6, 10^9). They do so for property and crops losses.
+
+```{r units}
+stormunits<-transform(storm, PROPDMGEXP=as.character(PROPDMGEXP), CROPDMGEXP=as.character(CROPDMGEXP),PROPDMG=ifelse(storm$PROPDMGEXP=="K",PROPDMG*1000, ifelse(storm$PROPDMGEXP=="M",PROPDMG*10^6, ifelse(storm$PROPDMGEXP=="B",PROPDMG*10^9,PROPDMG))),
+CROPDMG=ifelse(storm$CROPDMGEXP=="K",CROPDMG*1000, ifelse(storm$CROPDMGEXP=="M",CROPDMG*10^6, ifelse(storm$CROPDMGEXP=="B",CROPDMG*10^9,CROPDMG))))
+```
+
+The next step is to calculate the sum of all losses by type of event across the entire period under study. In the same line of code a new variable is created, "totdmg", that is the sum of the property and crops losses in USD by type of event during the period in study.
+```{r sum 2}
+stormdmg<-summarize(group_by(stormunits,EVTYPE),sprop =sum(PROPDMG,na.rm=T),scrop=sum(CROPDMG,na.rm=T),totdmg=sprop+scrop)
+```
+
+Just like with the first question, the following data transformations are used to sort the types of events based on the economic losses, presenting the top 20 types of events individually, and grouping all other types of events that cause fewer fatalities under the general category "Other", which will simplify the presentation of the results.
+
+```{r arrange and bind 2}
+stormdmg<-arrange(stormdmg,totdmg,sprop,scrop)
+ecotoptypes<-stormdmg[(nrow(stormdmg)-19):nrow(stormdmg),]
+ecobottypes<-stormdmg[1:(nrow(stormdmg)-20),]
+totbot<-summarize(ecobottypes,sprop=sum(sprop),scrop=sum(scrop),totdmg=sprop+scrop)
+totbot<-mutate(totbot,EVTYPE="OTHER")
+totbot<-select(totbot,EVTYPE,sprop,scrop,totdmg)
+ecotypes<-rbind(totbot,ecotoptypes)
+```
+
+The last table above, "ecotypes", contains the data re-arranged in a list of the 20 events that have caused more fatalities. It also presents a 21st group that shows the sum of the fatalities caused by all other events. The results are presented in the corresponding figure in the results section below.
+
+###RESULTS
+
+####Impact on public health
+The code below is used to construct figure 1, that contains two charts: the first chart on top shows that Tornadoes are the type of weather event that have caused more fatalities in the US in the period under review, followed by Excessive heat and Flash flood. Following the criterion explained above, Tornadoes are the type of weather event with highest impact on public health in the period under review.
+The second chart in the figure shows that Tornadoes are also the most impactful type of event in terms of personal injuries caused.
+
+```{r figure 1}
+wrapper <- function(x, ...) 
+{
+  paste(strwrap(x, ...), collapse = "\n")
+}
+
+main_title <-"Fig. 1 - Impact of storms and severe weather events in public health. US, 1950-2011. Source: NOAA"
+g<-ggplot(heatypes,aes(x=factor(EVTYPE,level=EVTYPE),y=sfat))+geom_col(aes(fill=EVTYPE))+theme_bw()+theme(axis.text.x = element_text(size=8,angle=85,vjust=0.6),axis.text.y=element_text(size=6))+theme(axis.line = element_line(colour = "blue"), panel.border = element_blank())+theme(legend.position="none")+labs(x="Event Type",y="Fatalities",size=8)+ ggtitle(wrapper(main_title, width = 65))+scale_y_continuous(labels=scales::comma_format(accuracy=1), expand = c(0, 0),breaks= c(seq(0,max(heatypes$sfat),by=1000) , max(heatypes$sfat)))+geom_hline(yintercept=max(heatypes$sfat),linetype="dashed",color="violet")+coord_flip()
+
+inj_title <-""
+h<-ggplot(heatypes,aes(x=factor(EVTYPE,level=EVTYPE),y=sinj))+geom_col(aes(fill=EVTYPE))+theme_bw()+theme(axis.text.x = element_text(size=8,angle=85,vjust=0.6),axis.text.y=element_text(size=6))+theme(axis.line = element_line(colour = "blue"), panel.border = element_blank())+theme(legend.position="none")+labs(x="Event type",y="Injuries",size=8)+ ggtitle(wrapper(inj_title, width = 50))+scale_y_continuous(labels=scales::comma_format(accuracy=1), expand = c(0, 0),breaks= c(seq(0,max(heatypes$sinj),by=20000) , max(heatypes$sinj)))+geom_hline(yintercept=max(heatypes$sinj),linetype="dashed",color="violet")+coord_flip()
+
+health<-ggarrange(g,h,labels=c(""),ncol = 1, nrow = 2)
+print(health)
+
+```
+
+The table below presents the same results shown in figure 1.
+Tornadoes are the wheather event with greatest impact on public health.
+```{r table 1}
+print(heatypes[nrow(heatypes):1,],n=21)
+```
+
+####Impact on the economy
+The code below is used to construct two figures
+
+Figure 2 shows that Floods are the type of weather event that have caused highest economic losses in the period under review, all consequences compbined. Floods are followed by Hurricanes/Typhoons and Tornadoes. Therefore, and consistent with the criterion chosen, Floods are the type of weather event with highest economic impact in the US in the period under review.
+
+```{r figure 2}
+wrapper <- function(x, ...) 
+{
+  paste(strwrap(x, ...), collapse = "\n")
+}
+
+main_title <-"Fig. 2 - Total economic impact of storms and other weather events between 1950 and 2011 in the US. Source: NOAA"
+p<-ggplot(ecotypes,aes(x=factor(EVTYPE,level=EVTYPE),y=totdmg))+geom_col(aes(fill=EVTYPE))+theme_bw()+theme(axis.text.x = element_text(size=9,angle=85,vjust=0.6),axis.text.y=element_text(size=8))+ theme(axis.line = element_line(colour = "blue"), panel.border = element_blank())+theme(legend.position="none")+labs(x="Event Type",y="TOTAL impact - BILLION USD",size=6)+ theme(plot.title = element_text(size=12))+ggtitle(wrapper(main_title, width=65))+scale_y_continuous(limits=c(0,151*10^9),labels=function(x)x/10^9,expand =c(0,0))+geom_hline(yintercept=max(ecotypes$totdmg),linetype="dashed",color="violet")+coord_flip()
+print(p)
+```
+
+The table below presents the same results shown in figure 2, but in this case the losses are reported in USD.
+Floods are the wheather event with greatest economic impact.
+
+```{r table 2}
+ecotypes2<- transform(ecotypes,scrop= formatC(as.numeric(scrop),format="f",digits=0,big.mark=","),sprop= formatC(as.numeric(sprop),format="f",digits=0,big.mark=","),totdmg= formatC(as.numeric(totdmg),format="f",digits=0,big.mark=","))
+select(ecotypes2[nrow(ecotypes2):1,],c(1,4))
+```
+
+Figure 3 shows, on the top chart, that Floods are also the most impactful type of event in terms of property damage. An interesting fact shown by the bottom chart in figure 3 is that the economic impact on crops is significantly lower than the impact on property. The charts on figures 2 and 3 maintain the same horizontal scale (Billion USD) to make this fact evident.
+
+```{r figure 3}
+prop_title<-"Fig. 3 - Property and crops losses. US 1950-2011. Source: NOAA"
+m<-ggplot(ecotypes,aes(x=factor(EVTYPE,level=EVTYPE),y=sprop))+geom_col(aes(fill=EVTYPE))+ theme_bw()+theme(axis.text.x = element_text(size=9,angle=85,vjust=0.6),axis.text.y=element_text(size=6))+theme(axis.line = element_line(colour = "blue"), panel.border = element_blank())+theme(legend.position="none")+labs(x="Event type",y="Impact on property - Billion USD",size=6)+ theme(plot.title = element_text(size=12))+ggtitle(wrapper(prop_title, width = 65))+scale_y_continuous(limits=c(0,150*10^9),labels=function(x)x/10^9, expand = c(0, 0))+geom_hline(yintercept=max(ecotypes$sprop),linetype="dashed",color="violet")+coord_flip()
+
+crop_title<-"*****************************************************************************"
+n<-ggplot(ecotypes,aes(x=factor(EVTYPE,level=EVTYPE),y=scrop))+geom_col(aes(fill=EVTYPE))+ theme_bw()+theme(axis.text.x = element_text(size=9,angle=85,vjust=0.6),axis.text.y=element_text(size=6))+theme(axis.line = element_line(colour = "blue"), panel.border = element_blank())+theme(legend.position="none")+labs(x="Event type",y="Impact on crops - Billion USD",size=6)+ theme(plot.title = element_text(size=12))+ggtitle(wrapper(crop_title, width = 65))+scale_y_continuous(limits=c(0,150*10^9),labels=function(x)x/10^9, expand = c(0, 0))+geom_hline(yintercept=max(ecotypes$scrop),linetype="dashed",color="violet")+coord_flip()
+
+economic<-ggarrange(m,n,labels="",ncol = 1, nrow = 2)
+print(economic)
+
+```
+
